@@ -28,6 +28,10 @@ public class EnemyBTController : MonoBehaviour
     [SerializeField] private float chaseSpeed = 4f;
     [SerializeField] private float fleeSpeed = 5f;
 
+    // Memory untuk Search Last Seen Position
+    private Vector3 lastSeenPosition;
+    private bool hasLastSeenPosition = false;
+
     [Header("Debug")]
     [SerializeField] private string currentAction = "None";
 
@@ -36,6 +40,31 @@ public class EnemyBTController : MonoBehaviour
 
     private int currentHealth;
     private int currentPatrolIndex = 0;
+
+    // =========================
+    // HEALTH DATA FOR UI
+    // =========================
+
+    public float HealthNormalized
+    {
+        get
+        {
+            if (maxHealth <= 0)
+                return 0f;
+
+            return (float)currentHealth / maxHealth;
+        }
+    }
+
+    public int CurrentHealth
+    {
+        get { return currentHealth; }
+    }
+
+    public int MaxHealth
+    {
+        get { return maxHealth; }
+    }
 
     private void Awake()
     {
@@ -55,6 +84,10 @@ public class EnemyBTController : MonoBehaviour
             rootNode.Tick();
         }
     }
+
+    // =========================
+    // BUILD BEHAVIOR TREE
+    // =========================
 
     private void BuildBehaviorTree()
     {
@@ -98,6 +131,16 @@ public class EnemyBTController : MonoBehaviour
                 }
             );
 
+        // SEARCH LAST SEEN POSITION
+        BTNode searchSequence =
+            new SequenceNode(
+                new List<BTNode>
+                {
+                    new ConditionNode(HasLastSeenPosition),
+                    new ActionNode(SearchLastSeenPosition)
+                }
+            );
+
         // PATROL
         BTNode patrolAction =
             new ActionNode(Patrol);
@@ -110,6 +153,7 @@ public class EnemyBTController : MonoBehaviour
                     fleeSequence,
                     attackSequence,
                     chaseSequence,
+                    searchSequence,
                     patrolAction
                 }
             );
@@ -136,6 +180,11 @@ public class EnemyBTController : MonoBehaviour
             );
 
         return distance <= attackRange;
+    }
+
+    private bool HasLastSeenPosition()
+    {
+        return hasLastSeenPosition;
     }
 
     private bool CanSeePlayer()
@@ -177,7 +226,15 @@ public class EnemyBTController : MonoBehaviour
                 obstacleMask
             );
 
-        return !blocked;
+        if (!blocked)
+        {
+            lastSeenPosition = player.position;
+            hasLastSeenPosition = true;
+
+            return true;
+        }
+
+        return false;
     }
 
     // =========================
@@ -234,6 +291,30 @@ public class EnemyBTController : MonoBehaviour
         return NodeState.Running;
     }
 
+    private NodeState SearchLastSeenPosition()
+    {
+        if (!hasLastSeenPosition)
+            return NodeState.Failure;
+
+        currentAction = "SEARCH";
+
+        agent.isStopped = false;
+        agent.speed = chaseSpeed;
+        agent.stoppingDistance = 0.3f;
+
+        agent.SetDestination(lastSeenPosition);
+
+        if (!agent.pathPending &&
+            agent.remainingDistance <= 0.5f)
+        {
+            hasLastSeenPosition = false;
+
+            return NodeState.Success;
+        }
+
+        return NodeState.Running;
+    }
+
     private NodeState AttackPlayer()
     {
         if (player == null)
@@ -283,7 +364,6 @@ public class EnemyBTController : MonoBehaviour
             agent.remainingDistance <= 0.7f)
         {
             agent.isStopped = true;
-
             return NodeState.Success;
         }
 
@@ -293,8 +373,7 @@ public class EnemyBTController : MonoBehaviour
     private void FacePlayer()
     {
         Vector3 direction =
-            player.position
-            - transform.position;
+            player.position - transform.position;
 
         direction.y = 0f;
 
